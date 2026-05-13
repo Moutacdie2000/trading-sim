@@ -1,5 +1,3 @@
-import { createServer } from 'node:http';
-
 import Fastify from 'fastify';
 import { WebSocketServer, type WebSocket } from 'ws';
 
@@ -7,46 +5,19 @@ import { EngineProcess } from './engine_process.js';
 import { Hub } from './hub.js';
 import { Metrics } from './metrics.js';
 
-const ENGINE_BIN     = process.env.ENGINE_BIN ?? '../engine/build/apps/sim_runner';
-const PORT           = Number(process.env.PORT ?? 8080);
-const STALE_FEED_MS  = 10_000;
+const ENGINE_BIN          = process.env.ENGINE_BIN ?? '../engine/build/apps/sim_runner';
+const PORT                = Number(process.env.PORT ?? 8080);
+const STALE_FEED_MS       = 10_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 
 async function main(): Promise<void> {
-  const app    = Fastify({ logger: true });
-  const server = createServer(app as never);
-  const wss    = new WebSocketServer({ server, path: '/feed' });
+  const app = Fastify({ logger: true });
 
   const engine  = new EngineProcess({ bin: ENGINE_BIN });
   const hub     = new Hub<WebSocket>();
   const metrics = new Metrics();
 
   let lastEventAt: number | null = null;
-
-  wss.on('connection', (ws) => {
-    hub.addClient(ws);
-    metrics.setClients(hub.count());
-    app.log.info({ clients: hub.count() }, 'client connected');
-    ws.on('close', () => {
-      hub.removeClient(ws);
-      metrics.setClients(hub.count());
-      app.log.info({ clients: hub.count() }, 'client disconnected');
-    });
-  });
-
-  engine.on('event', (event) => {
-    lastEventAt = Date.now();
-    metrics.incEvent(event.type);
-    hub.broadcast(JSON.stringify(event));
-  });
-
-  engine.on('exit',    (code)         => app.log.warn({ code }, 'engine exited'));
-  engine.on('error',   (err)          => app.log.error({ err }, 'engine error'));
-  engine.on('restart', (attempt, ms)  => {
-    metrics.incEngineRestart();
-    app.log.warn({ attempt, ms }, 'engine restart scheduled');
-  });
-  engine.on('giveup',  (reason)       => app.log.fatal({ reason }, 'engine giving up'));
 
   app.get('/healthz', async (_req, reply) => {
     const engineAlive = engine.isRunning;
@@ -68,11 +39,46 @@ async function main(): Promise<void> {
     return metrics.render();
   });
 
+  // Bind ws.Server to Fastify's underlying http.Server. noServer + manual
+  // upgrade keeps Fastify in charge of HTTP routing while ws owns /feed.
+  const wss = new WebSocketServer({ noServer: true });
+
+  wss.on('connection', (ws) => {
+    hub.addClient(ws);
+    metrics.setClients(hub.count());
+    app.log.info({ clients: hub.count() }, 'client connected');
+    ws.on('close', () => {
+      hub.removeClient(ws);
+      metrics.setClients(hub.count());
+      app.log.info({ clients: hub.count() }, 'client disconnected');
+    });
+  });
+
+  engine.on('event', (event) => {
+    lastEventAt = Date.now();
+    metrics.incEvent(event.type);
+    hub.broadcast(JSON.stringify(event));
+  });
+  engine.on('exit',    (code)        => app.log.warn ({ code },          'engine exited'));
+  engine.on('error',   (err)         => app.log.error({ err },           'engine error'));
+  engine.on('restart', (attempt, ms) => {
+    metrics.incEngineRestart();
+    app.log.warn({ attempt, ms }, 'engine restart scheduled');
+  });
+  engine.on('giveup',  (reason)      => app.log.fatal({ reason },        'engine giving up'));
+
   engine.start();
 
-  await app.ready();
-  server.listen(PORT, () => {
-    app.log.info(`gateway listening on http://localhost:${PORT}`);
+  await app.listen({ port: PORT, host: '0.0.0.0' });
+
+  app.server.on('upgrade', (req, socket, head) => {
+    if (req.url !== '/feed') {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
   });
 
   let shuttingDown = false;
@@ -91,12 +97,12 @@ async function main(): Promise<void> {
       try { ws.close(1001, 'gateway shutting down'); } catch { /* ignore */ }
     }
     engine.stop();
-    server.close(() => {
+    app.close().then(() => {
       clearTimeout(fallback);
       process.exit(0);
     });
   };
-  process.on('SIGINT', shutdown);
+  process.on('SIGINT',  shutdown);
   process.on('SIGTERM', shutdown);
 }
 
