@@ -1,0 +1,130 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0d12;
+  --panel: #141822;
+  --fg: #e7eaf0;
+  --muted: #8a93a6;
+  --bid: #4ade80;
+  --ask: #f87171;
+  --ok: #22c55e;
+  --ko: #ef4444;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+h1 { margin: 0; font-size: 20px; letter-spacing: 0.04em; }
+
+.pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: #1f2531;
+}
+.pill.ok { color: var(--ok); }
+.pill.ko { color: var(--ko); }
+
+.banner {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 8px;
+  background: #1f2531;
+  border-radius: 6px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  grid-template-rows: auto auto;
+  gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+article {
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+h2 { margin: 0 0 12px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+.book {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 400; padding-bottom: 6px; }
+td { padding: 3px 0; }
+.bid { color: var(--bid); }
+.ask { color: var(--ask); }
+
+.tape {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.tape li {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid #1f2531;
+}
+.tape code { color: var(--muted); }
+
+.depth-chart {
+  width: 100%;
+  height: 240px;
+  display: block;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stat-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.stat-value {
+  font-size: 18px;
+  color: var(--fg);
+}
+
+.sparkline {
+  width: 100%;
+  height: 36px;
+  display: block;
+}
