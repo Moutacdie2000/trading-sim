@@ -1,0 +1,24 @@
+services:
+  gateway:
+    image: node:20-bookworm
+    working_dir: /app
+    volumes:
+      - ./gateway:/app
+      - ./engine/build/apps/sim_runner:/usr/local/bin/sim_runner:ro
+    environment:
+      ENGINE_BIN: /usr/local/bin/sim_runner
+      PORT: 8080
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "8080:8080"
+
+  web:
+    image: node:20-bookworm
+    working_dir: /app
+    volumes:
+      - ./web:/app
+    environment:
+      VITE_FEED_URL: ws://localhost:8080/feed
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
