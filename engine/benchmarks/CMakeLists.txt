@@ -1,0 +1,2 @@
+add_executable(bench_order_book bench_order_book.cpp)
+target_link_libraries(bench_order_book PRIVATE engine)
