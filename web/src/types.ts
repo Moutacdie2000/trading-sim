@@ -43,6 +43,15 @@ export type EngineEvent = TradeEvent | BookEvent | StatsEvent | AckEvent | State
 
 export interface PriceSample { ts: number; price: number; }
 
+export interface Candle {
+  startMs: number;
+  open:    number;
+  high:    number;
+  low:     number;
+  close:   number;
+  volume:  number;
+}
+
 // ---- My orders ---------------------------------------------------------------
 
 export type OrderSide = 'buy' | 'sell';

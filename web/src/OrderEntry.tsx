@@ -1,38 +1,57 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { OrderSide, OrderType } from './types.js';
 
 interface Props {
-  bestBid:     number | null;
-  bestAsk:     number | null;
-  disabled:    boolean;
-  onSubmit:    (params: { side: OrderSide; type: OrderType; price: number; qty: number }) => void;
+  bestBid:  number | null;
+  bestAsk:  number | null;
+  balance:  number;
+  disabled: boolean;
+  onSubmit: (params: { side: OrderSide; type: OrderType; price: number; qty: number }) =>
+              { ok: true; clientId: string } | { ok: false; reason: string };
 }
 
-export function OrderEntry({ bestBid, bestAsk, disabled, onSubmit }: Props) {
+export function OrderEntry({ bestBid, bestAsk, balance, disabled, onSubmit }: Props) {
   const [side,  setSide]  = useState<OrderSide>('buy');
   const [type,  setType]  = useState<OrderType>('limit');
   const [price, setPrice] = useState<string>('');
   const [qty,   setQty]   = useState<string>('5');
   const [flash, setFlash] = useState<'ok' | 'err' | null>(null);
-
-  const priceRef = useRef<HTMLInputElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (price === '' && type === 'limit') {
-      const mid = bestBid !== null && bestAsk !== null ? (bestBid + bestAsk) / 2 : null;
-      if (mid !== null) setPrice(mid.toFixed(2));
+    if (price === '' && type !== 'market') {
+      const ref = side === 'buy' ? bestAsk : bestBid;
+      if (ref !== null) setPrice(ref.toFixed(2));
     }
-  }, [bestBid, bestAsk, price, type]);
+  }, [bestBid, bestAsk, price, type, side]);
 
   const needsPrice = type !== 'market';
+  const numericPrice = Number.parseFloat(price);
+  const numericQty   = Number.parseInt(qty, 10);
+
+  const estCost = useMemo(() => {
+    if (!Number.isFinite(numericQty) || numericQty <= 0) return null;
+    if (side === 'sell') return null;
+    const ref = needsPrice ? numericPrice : bestAsk;
+    if (ref === null || !Number.isFinite(ref) || ref <= 0) return null;
+    return ref * numericQty;
+  }, [side, needsPrice, numericPrice, numericQty, bestAsk]);
+
+  const insufficient = estCost !== null && estCost > balance;
 
   function commit(): void {
-    const q = Number.parseInt(qty, 10);
-    const p = needsPrice ? Number.parseFloat(price) : 0;
-    if (!Number.isFinite(q) || q <= 0)                       { setFlash('err'); return; }
-    if (needsPrice && (!Number.isFinite(p) || p <= 0))       { setFlash('err'); return; }
-    onSubmit({ side, type, price: p, qty: q });
+    setError(null);
+    const q = numericQty;
+    const p = needsPrice ? numericPrice : 0;
+    if (!Number.isFinite(q) || q <= 0)                          { setFlash('err'); setError('Quantity must be a positive integer'); return; }
+    if (needsPrice && (!Number.isFinite(p) || p <= 0))          { setFlash('err'); setError('Price must be positive'); return; }
+    const res = onSubmit({ side, type, price: p, qty: q });
+    if (!res.ok) {
+      setFlash('err');
+      setError(res.reason);
+      return;
+    }
     setFlash('ok');
     setQty('5');
   }
@@ -43,10 +62,11 @@ export function OrderEntry({ bestBid, bestAsk, disabled, onSubmit }: Props) {
     return () => clearTimeout(t);
   }, [flash]);
 
-  // Keyboard: B/S to switch side, Enter (from any field) submits.
   function onKeyDown(e: React.KeyboardEvent<HTMLFormElement>): void {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
   }
+
+  const submitDisabled = disabled || insufficient;
 
   return (
     <form
@@ -80,7 +100,6 @@ export function OrderEntry({ bestBid, bestAsk, disabled, onSubmit }: Props) {
       <label className="field">
         <span>Price {!needsPrice && <em>(ignored)</em>}</span>
         <input
-          ref={priceRef}
           type="number"
           step="0.01"
           min="0"
@@ -101,12 +120,25 @@ export function OrderEntry({ bestBid, bestAsk, disabled, onSubmit }: Props) {
         />
       </label>
 
-      <button type="submit" className="submit-btn" disabled={disabled}>
-        {disabled ? 'Disconnected' : `Send ${side.toUpperCase()} (Enter)`}
+      {estCost !== null && (
+        <div className={`cost-line ${insufficient ? 'bad' : ''}`}>
+          Est. cost: ${estCost.toFixed(2)} · balance ${balance.toFixed(2)}
+          {insufficient && ' · insufficient'}
+        </div>
+      )}
+
+      <button type="submit" className="submit-btn" disabled={submitDisabled}>
+        {disabled
+          ? 'Disconnected'
+          : insufficient
+              ? 'Not enough cash'
+              : `Send ${side.toUpperCase()} (Enter)`}
       </button>
 
+      {error !== null && <div className="error">{error}</div>}
+
       <div className="hint">
-        Tip: best bid {bestBid?.toFixed(2) ?? '—'} · best ask {bestAsk?.toFixed(2) ?? '—'}
+        best bid {bestBid?.toFixed(2) ?? '—'} · best ask {bestAsk?.toFixed(2) ?? '—'}
       </div>
     </form>
   );

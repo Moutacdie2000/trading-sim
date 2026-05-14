@@ -1,5 +1,6 @@
 import { useEngineFeed } from './useEngineFeed.js';
 import { DepthChart }   from './DepthChart.js';
+import { Candlestick }  from './Candlestick.js';
 import { StatsPanel }   from './StatsPanel.js';
 import { OrderEntry }   from './OrderEntry.js';
 import { MyOrders }     from './MyOrders.js';
@@ -11,10 +12,10 @@ const FEED_URL = import.meta.env.VITE_FEED_URL ?? 'ws://localhost:8080/feed';
 export function App() {
   const feed = useEngineFeed(FEED_URL);
   const {
-    book, trades, stats, priceHistory,
+    book, trades, candles, stats, priceHistory,
     connected, nextRetryInMs, paused,
     myOrders, pnl,
-    submit, cancel, togglePause,
+    submit, cancel, togglePause, recharge, reset,
   } = feed;
 
   const bestBid = book?.bids[0]?.[0] ?? null;
@@ -33,6 +34,9 @@ export function App() {
           </span>
         )}
         <span className="spacer" />
+        <span className="balance-chip" title="Available cash">
+          💰 ${pnl.balance.toFixed(2)}
+        </span>
         <button
           className={`pause-btn ${paused ? 'paused' : ''}`}
           onClick={togglePause}
@@ -50,19 +54,25 @@ export function App() {
           <OrderEntry
             bestBid={bestBid}
             bestAsk={bestAsk}
+            balance={pnl.balance}
             disabled={!connected}
             onSubmit={submit}
           />
         </article>
 
-        <article>
-          <h2>Depth</h2>
-          <DepthChart bids={book?.bids ?? []} asks={book?.asks ?? []} />
+        <article className="candles-panel">
+          <h2>Price (5s candles)</h2>
+          <Candlestick candles={candles} />
         </article>
 
         <article>
           <h2>P&amp;L</h2>
-          <Pnl pnl={pnl} />
+          <Pnl pnl={pnl} onRecharge={recharge} onReset={reset} />
+        </article>
+
+        <article>
+          <h2>Depth</h2>
+          <DepthChart bids={book?.bids ?? []} asks={book?.asks ?? []} />
         </article>
 
         <article className="trades-panel">
@@ -81,11 +91,6 @@ export function App() {
               );
             })}
           </ol>
-        </article>
-
-        <article className="orders-panel">
-          <h2>My orders</h2>
-          <MyOrders orders={myOrders} onCancel={cancel} />
         </article>
 
         <article>
@@ -121,6 +126,11 @@ export function App() {
         </article>
 
         <StatsPanel stats={stats} priceHistory={priceHistory} />
+
+        <article className="orders-panel">
+          <h2>My orders</h2>
+          <MyOrders orders={myOrders} onCancel={cancel} />
+        </article>
       </section>
     </main>
   );
