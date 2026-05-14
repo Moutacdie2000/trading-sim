@@ -1,12 +1,24 @@
-import { DepthChart } from './DepthChart.js';
-import { StatsPanel } from './StatsPanel.js';
 import { useEngineFeed } from './useEngineFeed.js';
+import { DepthChart }   from './DepthChart.js';
+import { StatsPanel }   from './StatsPanel.js';
+import { OrderEntry }   from './OrderEntry.js';
+import { MyOrders }     from './MyOrders.js';
+import { Pnl }          from './Pnl.js';
+import { Help }         from './Help.js';
 
 const FEED_URL = import.meta.env.VITE_FEED_URL ?? 'ws://localhost:8080/feed';
 
 export function App() {
-  const { book, trades, stats, priceHistory, connected, nextRetryInMs } =
-    useEngineFeed(FEED_URL);
+  const feed = useEngineFeed(FEED_URL);
+  const {
+    book, trades, stats, priceHistory,
+    connected, nextRetryInMs, paused,
+    myOrders, pnl,
+    submit, cancel, togglePause,
+  } = feed;
+
+  const bestBid = book?.bids[0]?.[0] ?? null;
+  const bestAsk = book?.asks[0]?.[0] ?? null;
 
   return (
     <main>
@@ -20,30 +32,66 @@ export function App() {
             Reconnecting in {Math.max(1, Math.ceil(nextRetryInMs / 1000))}s…
           </span>
         )}
+        <span className="spacer" />
+        <button
+          className={`pause-btn ${paused ? 'paused' : ''}`}
+          onClick={togglePause}
+          disabled={!connected}
+          title="Pause/resume the synthetic order flow"
+        >
+          {paused ? '▶ Resume flow' : '⏸ Pause flow'}
+        </button>
+        <Help />
       </header>
 
       <section className="grid">
+        <article className="entry-panel">
+          <h2>Submit order</h2>
+          <OrderEntry
+            bestBid={bestBid}
+            bestAsk={bestAsk}
+            disabled={!connected}
+            onSubmit={submit}
+          />
+        </article>
+
         <article>
           <h2>Depth</h2>
           <DepthChart bids={book?.bids ?? []} asks={book?.asks ?? []} />
         </article>
 
         <article>
+          <h2>P&amp;L</h2>
+          <Pnl pnl={pnl} />
+        </article>
+
+        <article className="trades-panel">
           <h2>Recent trades</h2>
           <ol className="tape">
-            {trades.map((t) => (
-              <li key={`${t.ts}-${t.buy}-${t.sell}`}>
-                <code>{new Date(t.ts).toISOString().slice(11, 19)}</code>
-                <span>{t.qty} @ {t.price.toFixed(2)}</span>
-              </li>
-            ))}
+            {trades.map((t) => {
+              const isUser = t.user_buy || t.user_sell;
+              return (
+                <li key={`${t.ts}-${t.buy}-${t.sell}`} className={isUser ? 'user-trade' : ''}>
+                  <code>{new Date(t.ts).toISOString().slice(11, 19)}</code>
+                  <span>
+                    {isUser && <span className="user-tag">{t.user_buy ? 'YOU BUY' : 'YOU SELL'}</span>}
+                    {t.qty} @ {t.price.toFixed(2)}
+                  </span>
+                </li>
+              );
+            })}
           </ol>
+        </article>
+
+        <article className="orders-panel">
+          <h2>My orders</h2>
+          <MyOrders orders={myOrders} onCancel={cancel} />
         </article>
 
         <article>
           <h2>Order book</h2>
           {book === null ? (
-            <p>Waiting for snapshot…</p>
+            <p className="muted">Waiting for snapshot…</p>
           ) : (
             <div className="book">
               <table>

@@ -11,8 +11,10 @@ export class Metrics {
   private engineRestarts_ = 0;
   private readonly events_: Record<EngineEventType, number> = {
     trade: 0,
-    book: 0,
+    book:  0,
     stats: 0,
+    ack:   0,
+    state: 0,
   };
 
   setClients(n: number): void { this.clients_ = n; }

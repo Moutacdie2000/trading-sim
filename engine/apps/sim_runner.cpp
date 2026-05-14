@@ -1,10 +1,20 @@
 // sim_runner — drives an OrderBook with synthetic flow and emits NDJSON events
 // to stdout. The gateway parses each line and re-broadcasts it over WebSocket.
 //
-// Event shapes (one JSON object per line):
-//   {"type":"trade","ts":<ms>,"price":<num>,"qty":<int>,"buy":<id>,"sell":<id>}
+// Inbound commands (one per line, on stdin):
+//   submit <buy|sell> <limit|market|ioc|fok> <price> <qty> <client_id>
+//   cancel <id>
+//   pause
+//   resume
+//
+// Outbound events (one JSON object per line on stdout):
+//   {"type":"trade","ts":<ms>,"price":<num>,"qty":<int>,"buy":<id>,"sell":<id>
+//                  ,"user_buy"?:true,"user_sell"?:true}
 //   {"type":"book","ts":<ms>,"bids":[[price,qty],...],"asks":[[price,qty],...]}
 //   {"type":"stats","ts":<ms>,"orders":<int>,"trades":<int>,"books":<int>}
+//   {"type":"ack","ts":<ms>,"kind":"submit","order_id":<int>,"client_id":"..."}
+//   {"type":"ack","ts":<ms>,"kind":"cancel","order_id":<int>,"ok":<bool>}
+//   {"type":"state","ts":<ms>,"paused":<bool>}
 
 #include "engine/flow_generator.hpp"
 #include "engine/order_book.hpp"
@@ -16,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -23,7 +34,13 @@
 
 namespace {
 
+// User-submitted orders live in their own ID range so trades involving them can
+// be flagged without any bookkeeping at the matching layer.
+constexpr engine::OrderId kUserIdBase = 1'000'000'000ULL;
+
 std::atomic<bool> running{true};
+std::atomic<bool> paused {false};
+std::mutex        emit_mu;
 
 void handle_signal(int) { running = false; }
 
@@ -33,51 +50,37 @@ std::int64_t now_ms() {
 }
 
 // Small NDJSON helper: a manual builder that appends fields with proper commas.
-// Stdlib-only on purpose — pulling in a JSON dep for ~3 event shapes is overkill.
+// Stdlib-only on purpose — pulling in a JSON dep for a handful of event shapes is overkill.
 class JsonLine {
 public:
     explicit JsonLine(std::string_view type) {
         os_ << '{';
-        append_raw("\"type\"", quote(type));
+        os_ << "\"type\":" << quote(type);
         first_ = false;
     }
 
     JsonLine& field(std::string_view key, std::int64_t v) {
-        sep();
-        os_ << quote(key) << ':' << v;
-        return *this;
+        sep(); os_ << quote(key) << ':' << v; return *this;
     }
     JsonLine& field(std::string_view key, std::uint64_t v) {
-        sep();
-        os_ << quote(key) << ':' << v;
-        return *this;
+        sep(); os_ << quote(key) << ':' << v; return *this;
     }
     JsonLine& field(std::string_view key, double v) {
-        sep();
-        os_ << quote(key) << ':' << v;
-        return *this;
+        sep(); os_ << quote(key) << ':' << v; return *this;
     }
     JsonLine& field(std::string_view key, std::string_view v) {
-        sep();
-        os_ << quote(key) << ':' << quote(v);
-        return *this;
+        sep(); os_ << quote(key) << ':' << quote(v); return *this;
     }
-    // Raw value (already-formatted JSON fragment, e.g. an array literal).
+    JsonLine& field(std::string_view key, bool v) {
+        sep(); os_ << quote(key) << ':' << (v ? "true" : "false"); return *this;
+    }
     JsonLine& raw_field(std::string_view key, std::string_view raw) {
-        sep();
-        os_ << quote(key) << ':' << raw;
-        return *this;
+        sep(); os_ << quote(key) << ':' << raw; return *this;
     }
 
-    std::string str() {
-        os_ << '}';
-        return os_.str();
-    }
+    std::string str() { os_ << '}'; return os_.str(); }
 
 private:
-    void append_raw(std::string_view key, const std::string& val) {
-        os_ << key << ':' << val;
-    }
     void sep() {
         if (!first_) os_ << ',';
         first_ = false;
@@ -96,17 +99,20 @@ private:
 };
 
 void emit(const std::string& line) {
+    std::lock_guard<std::mutex> lock(emit_mu);
     std::cout << line << '\n' << std::flush;
 }
 
 void emit_trade(const engine::Trade& t) {
-    emit(JsonLine("trade")
-            .field("ts",    now_ms())
-            .field("price", t.price)
-            .field("qty",   static_cast<std::uint64_t>(t.quantity))
-            .field("buy",   static_cast<std::uint64_t>(t.buy_order_id))
-            .field("sell",  static_cast<std::uint64_t>(t.sell_order_id))
-            .str());
+    JsonLine j("trade");
+    j.field("ts",    now_ms())
+     .field("price", t.price)
+     .field("qty",   static_cast<std::uint64_t>(t.quantity))
+     .field("buy",   static_cast<std::uint64_t>(t.buy_order_id))
+     .field("sell",  static_cast<std::uint64_t>(t.sell_order_id));
+    if (t.buy_order_id  >= kUserIdBase) j.field("user_buy",  true);
+    if (t.sell_order_id >= kUserIdBase) j.field("user_sell", true);
+    emit(j.str());
 }
 
 std::string levels_to_json(const std::vector<engine::OrderBook::Level>& levels) {
@@ -137,6 +143,86 @@ void emit_stats(std::uint64_t orders, std::uint64_t trades, std::uint64_t books)
             .field("trades", trades)
             .field("books",  books)
             .str());
+}
+
+void emit_submit_ack(engine::OrderId id, std::string_view client_id) {
+    emit(JsonLine("ack")
+            .field("ts",        now_ms())
+            .field("kind",      std::string_view{"submit"})
+            .field("order_id",  static_cast<std::uint64_t>(id))
+            .field("client_id", client_id)
+            .str());
+}
+
+void emit_cancel_ack(engine::OrderId id, bool ok) {
+    emit(JsonLine("ack")
+            .field("ts",       now_ms())
+            .field("kind",     std::string_view{"cancel"})
+            .field("order_id", static_cast<std::uint64_t>(id))
+            .field("ok",       ok)
+            .str());
+}
+
+void emit_state(bool is_paused) {
+    emit(JsonLine("state")
+            .field("ts",     now_ms())
+            .field("paused", is_paused)
+            .str());
+}
+
+engine::OrderType parse_type(std::string_view s) {
+    if (s == "market") return engine::OrderType::Market;
+    if (s == "ioc")    return engine::OrderType::IOC;
+    if (s == "fok")    return engine::OrderType::FOK;
+    return engine::OrderType::Limit;
+}
+
+void handle_command(const std::string& line, engine::OrderBook& book,
+                    std::atomic<engine::OrderId>& next_user_id) {
+    std::istringstream iss(line);
+    std::string cmd;
+    if (!(iss >> cmd)) return;
+
+    if (cmd == "pause") {
+        paused = true;
+        emit_state(true);
+    } else if (cmd == "resume") {
+        paused = false;
+        emit_state(false);
+    } else if (cmd == "cancel") {
+        engine::OrderId id = 0;
+        if (!(iss >> id)) return;
+        const bool ok = book.cancel_order(id);
+        emit_cancel_ack(id, ok);
+    } else if (cmd == "submit") {
+        std::string side_str, type_str, client_id;
+        double            price = 0.0;
+        engine::Quantity  qty   = 0;
+        if (!(iss >> side_str >> type_str >> price >> qty >> client_id)) return;
+        if (qty == 0) return;
+
+        const engine::Side      side = (side_str == "buy") ? engine::Side::Buy : engine::Side::Sell;
+        const engine::OrderType type = parse_type(type_str);
+        const engine::OrderId   id   = next_user_id++;
+
+        engine::Order o{
+            id, side, price, qty,
+            std::chrono::system_clock::now(),
+            type,
+        };
+
+        emit_submit_ack(id, client_id);
+
+        for (const auto& t : book.add_order(o)) emit_trade(t);
+    }
+}
+
+void stdin_loop(engine::OrderBook& book, std::atomic<engine::OrderId>& next_user_id) {
+    std::string line;
+    while (running && std::getline(std::cin, line)) {
+        if (!line.empty()) handle_command(line, book, next_user_id);
+    }
+    running = false;  // EOF on stdin also terminates the producer loop
 }
 
 struct Args {
@@ -188,6 +274,11 @@ int main(int argc, char** argv) {
     engine::FlowGenerator gen(cfg);
     engine::OrderBook     book;
 
+    std::atomic<engine::OrderId> next_user_id{kUserIdBase};
+
+    std::thread reader([&] { stdin_loop(book, next_user_id); });
+    reader.detach();  // EOF will set running=false anyway; detach avoids a blocking join.
+
     const auto period = std::chrono::microseconds(
         args.rate > 0.0 ? static_cast<std::int64_t>(1e6 / args.rate) : 50'000);
 
@@ -206,17 +297,26 @@ int main(int argc, char** argv) {
         const auto now = std::chrono::steady_clock::now();
         if (now >= deadline) break;
 
-        const auto trades = book.add_order(gen.next());
-        ++orders_total;
-        for (const auto& t : trades) {
-            emit_trade(t);
-            ++trades_total;
-        }
-
-        if (++since_book >= 10) {
-            since_book = 0;
-            emit_book(book.snapshot(args.book_depth));
-            ++books_total;
+        if (!paused) {
+            const auto trades = book.add_order(gen.next());
+            ++orders_total;
+            for (const auto& t : trades) {
+                emit_trade(t);
+                ++trades_total;
+            }
+            if (++since_book >= 10) {
+                since_book = 0;
+                emit_book(book.snapshot(args.book_depth));
+                ++books_total;
+            }
+        } else {
+            // Still refresh the book snapshot occasionally while paused so the
+            // dashboard stays in sync with whatever user orders have arrived.
+            if (++since_book >= 20) {
+                since_book = 0;
+                emit_book(book.snapshot(args.book_depth));
+                ++books_total;
+            }
         }
 
         if (now >= next_stats_at) {

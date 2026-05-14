@@ -4,6 +4,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { EngineProcess } from './engine_process.js';
 import { Hub } from './hub.js';
 import { Metrics } from './metrics.js';
+import { formatCommand } from './types.js';
 
 const ENGINE_BIN          = process.env.ENGINE_BIN ?? '../engine/build/apps/sim_runner';
 const PORT                = Number(process.env.PORT ?? 8080);
@@ -47,6 +48,21 @@ async function main(): Promise<void> {
     hub.addClient(ws);
     metrics.setClients(hub.count());
     app.log.info({ clients: hub.count() }, 'client connected');
+
+    ws.on('message', (raw) => {
+      let parsed: unknown;
+      try { parsed = JSON.parse(raw.toString()); }
+      catch { return; }
+      const line = formatCommand(parsed);
+      if (line === null) {
+        app.log.warn({ payload: raw.toString().slice(0, 200) }, 'rejected command');
+        return;
+      }
+      if (!engine.write(line)) {
+        app.log.warn({ line }, 'engine not running, command dropped');
+      }
+    });
+
     ws.on('close', () => {
       hub.removeClient(ws);
       metrics.setClients(hub.count());

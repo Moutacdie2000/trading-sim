@@ -80,6 +80,13 @@ export class EngineProcess extends EventEmitter {
     if (this.child) this.child.kill('SIGTERM');
   }
 
+  // Forward a single newline-terminated command line to the engine's stdin.
+  // No-op when the engine isn't running — callers can fire-and-forget.
+  write(line: string): boolean {
+    if (!this.child) return false;
+    return this.child.stdin.write(line + '\n');
+  }
+
   private spawnChild(): void {
     const child = this.spawnFn(this.opts.bin, this.opts.args ?? []);
     this.child = child;
