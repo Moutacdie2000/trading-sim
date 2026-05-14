@@ -14,7 +14,7 @@ export function App() {
   const {
     book, trades, candles, stats, priceHistory,
     connected, nextRetryInMs, paused,
-    myOrders, pnl,
+    myOrders, pnl, reservedCash, availableCash,
     submit, cancel, togglePause, recharge, reset,
   } = feed;
 
@@ -34,8 +34,8 @@ export function App() {
           </span>
         )}
         <span className="spacer" />
-        <span className="balance-chip" title="Available cash">
-          💰 ${pnl.balance.toFixed(2)}
+        <span className="balance-chip" title={`Balance $${pnl.balance.toFixed(2)} · reserved $${reservedCash.toFixed(2)}`}>
+          💰 ${availableCash.toFixed(2)}
         </span>
         <button
           className={`pause-btn ${paused ? 'paused' : ''}`}
@@ -54,7 +54,7 @@ export function App() {
           <OrderEntry
             bestBid={bestBid}
             bestAsk={bestAsk}
-            balance={pnl.balance}
+            availableCash={availableCash}
             disabled={!connected}
             onSubmit={submit}
           />
@@ -67,7 +67,13 @@ export function App() {
 
         <article>
           <h2>P&amp;L</h2>
-          <Pnl pnl={pnl} onRecharge={recharge} onReset={reset} />
+          <Pnl
+            pnl={pnl}
+            reservedCash={reservedCash}
+            availableCash={availableCash}
+            onRecharge={recharge}
+            onReset={reset}
+          />
         </article>
 
         <article>

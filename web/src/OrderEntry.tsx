@@ -3,15 +3,15 @@ import { useEffect, useMemo, useState } from 'react';
 import type { OrderSide, OrderType } from './types';
 
 interface Props {
-  bestBid:  number | null;
-  bestAsk:  number | null;
-  balance:  number;
-  disabled: boolean;
-  onSubmit: (params: { side: OrderSide; type: OrderType; price: number; qty: number }) =>
-              { ok: true; clientId: string } | { ok: false; reason: string };
+  bestBid:       number | null;
+  bestAsk:       number | null;
+  availableCash: number;
+  disabled:      boolean;
+  onSubmit:      (params: { side: OrderSide; type: OrderType; price: number; qty: number }) =>
+                   { ok: true; clientId: string } | { ok: false; reason: string };
 }
 
-export function OrderEntry({ bestBid, bestAsk, balance, disabled, onSubmit }: Props) {
+export function OrderEntry({ bestBid, bestAsk, availableCash, disabled, onSubmit }: Props) {
   const [side,  setSide]  = useState<OrderSide>('buy');
   const [type,  setType]  = useState<OrderType>('limit');
   const [price, setPrice] = useState<string>('');
@@ -33,12 +33,15 @@ export function OrderEntry({ bestBid, bestAsk, balance, disabled, onSubmit }: Pr
   const estCost = useMemo(() => {
     if (!Number.isFinite(numericQty) || numericQty <= 0) return null;
     if (side === 'sell') return null;
-    const ref = needsPrice ? numericPrice : bestAsk;
+    // For market BUYs we add a 2% slippage buffer so the displayed estimate
+    // matches the affordability check inside the hook (which uses the same
+    // multiplier — see pnlReducer.MARKET_SLIPPAGE_BUFFER).
+    const ref = needsPrice ? numericPrice : (bestAsk === null ? null : bestAsk * 1.02);
     if (ref === null || !Number.isFinite(ref) || ref <= 0) return null;
     return ref * numericQty;
   }, [side, needsPrice, numericPrice, numericQty, bestAsk]);
 
-  const insufficient = estCost !== null && estCost > balance;
+  const insufficient = estCost !== null && estCost > availableCash;
 
   function commit(): void {
     setError(null);
@@ -122,7 +125,7 @@ export function OrderEntry({ bestBid, bestAsk, balance, disabled, onSubmit }: Pr
 
       {estCost !== null && (
         <div className={`cost-line ${insufficient ? 'bad' : ''}`}>
-          Est. cost: ${estCost.toFixed(2)} · balance ${balance.toFixed(2)}
+          Est. cost: ${estCost.toFixed(2)} · available ${availableCash.toFixed(2)}
           {insufficient && ' · insufficient'}
         </div>
       )}

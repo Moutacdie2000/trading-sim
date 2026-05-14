@@ -306,6 +306,9 @@ td { padding: 3px 0; }
 .pnl-row .val { font-variant-numeric: tabular-nums; }
 .pnl-row .val.pos { color: var(--bid); }
 .pnl-row .val.neg { color: var(--ask); }
+.pnl-row .val.muted { color: var(--muted); }
+.pnl-row.sub { padding-left: 8px; font-size: 12px; }
+.pnl-row.sub .lbl { color: var(--muted); }
 .pnl-row .val small { color: var(--muted); font-size: 11px; margin-left: 4px; }
 
 .pnl-actions {

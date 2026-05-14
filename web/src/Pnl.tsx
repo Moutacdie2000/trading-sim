@@ -1,12 +1,14 @@
 import type { PnlState } from './useEngineFeed';
 
 interface Props {
-  pnl:        PnlState;
-  onRecharge: () => void;
-  onReset:    () => void;
+  pnl:           PnlState;
+  reservedCash:  number;
+  availableCash: number;
+  onRecharge:    () => void;
+  onReset:       () => void;
 }
 
-export function Pnl({ pnl, onRecharge, onReset }: Props) {
+export function Pnl({ pnl, reservedCash, availableCash, onRecharge, onReset }: Props) {
   const pnlClass = pnl.totalPnl > 0 ? 'pos' : pnl.totalPnl < 0 ? 'neg' : '';
   const posClass = pnl.position > 0 ? 'pos' : pnl.position < 0 ? 'neg' : '';
   const lowBalance = pnl.balance < pnl.startingEquity * 0.1;
@@ -22,6 +24,18 @@ export function Pnl({ pnl, onRecharge, onReset }: Props) {
           ${pnl.balance.toFixed(2)}
         </span>
       </div>
+      {reservedCash > 0 && (
+        <>
+          <div className="pnl-row sub">
+            <span className="lbl"> · reserved (resting buys)</span>
+            <span className="val muted">−${reservedCash.toFixed(2)}</span>
+          </div>
+          <div className="pnl-row sub">
+            <span className="lbl"> · available</span>
+            <span className="val">${availableCash.toFixed(2)}</span>
+          </div>
+        </>
+      )}
       <div className="pnl-row">
         <span className="lbl">Position</span>
         <span className={`val ${posClass}`}>

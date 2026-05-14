@@ -1,31 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
   BookEvent, Candle, EngineEvent, MyOrder, PriceSample,
   StatsEvent, TradeEvent, ClientCommand,
 } from './types';
+import {
+  applyBook, applyRecharge, applyTradeToOrders, applyUserFill, appendCandle,
+  evaluateBuy, initialPnl, reservedCash,
+  type PnlState,
+} from './pnlReducer';
 
 const MAX_TRADES        = 50;
 const PRICE_BUFFER_MS   = 60_000;
 const BACKOFF_STEPS_MS  = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000] as const;
 const STABLE_OPEN_MS    = 10_000;
 
-const CANDLE_BUCKET_MS  = 5_000;
-const CANDLES_KEPT      = 60;        // 5 minutes of 5s candles
-
-const INITIAL_BALANCE   = 10_000;
-const RECHARGE_AMOUNT   = 10_000;
-
-export interface PnlState {
-  balance:        number;
-  startingEquity: number;
-  cashFlow:       number;
-  position:       number;
-  marketPrice:    number;
-  equity:         number;
-  totalPnl:       number;
-  totalRecharged: number;
-}
+export type { PnlState } from './pnlReducer';
 
 export interface FeedState {
   book:          BookEvent | null;
@@ -41,124 +31,22 @@ export interface FeedState {
 }
 
 export interface FeedApi extends FeedState {
-  send:        (cmd: ClientCommand) => void;
-  submit:      (params: Omit<Extract<ClientCommand, { cmd: 'submit' }>, 'cmd' | 'client_id'>) =>
-                  { ok: true; clientId: string } | { ok: false; reason: string };
-  cancel:      (orderId: number) => void;
-  togglePause: () => void;
-  recharge:    () => void;
-  reset:       () => void;
+  reservedCash:   number;
+  availableCash:  number;
+  send:           (cmd: ClientCommand) => void;
+  submit:         (params: Omit<Extract<ClientCommand, { cmd: 'submit' }>, 'cmd' | 'client_id'>) =>
+                    { ok: true; clientId: string } | { ok: false; reason: string };
+  cancel:         (orderId: number) => void;
+  togglePause:    () => void;
+  recharge:       () => void;
+  reset:          () => void;
 }
-
-const initialPnl: PnlState = {
-  balance:        INITIAL_BALANCE,
-  startingEquity: INITIAL_BALANCE,
-  cashFlow:       0,
-  position:       0,
-  marketPrice:    0,
-  equity:         INITIAL_BALANCE,
-  totalPnl:       0,
-  totalRecharged: 0,
-};
 
 const initialState: FeedState = {
   book: null, trades: [], candles: [], stats: null, priceHistory: [],
   connected: false, nextRetryInMs: null, paused: false,
   myOrders: [], pnl: initialPnl,
 };
-
-function appendCandle(prev: Candle[], trade: TradeEvent): Candle[] {
-  const startMs = Math.floor(trade.ts / CANDLE_BUCKET_MS) * CANDLE_BUCKET_MS;
-  const last    = prev[prev.length - 1];
-  if (last !== undefined && last.startMs === startMs) {
-    const updated: Candle = {
-      ...last,
-      high:   Math.max(last.high, trade.price),
-      low:    Math.min(last.low,  trade.price),
-      close:  trade.price,
-      volume: last.volume + trade.qty,
-    };
-    return [...prev.slice(0, -1), updated];
-  }
-  const fresh: Candle = {
-    startMs,
-    open:   trade.price,
-    high:   trade.price,
-    low:    trade.price,
-    close:  trade.price,
-    volume: trade.qty,
-  };
-  return [...prev, fresh].slice(-CANDLES_KEPT);
-}
-
-function recomputeEquity(pnl: PnlState, mark: number): PnlState {
-  const marketPrice = mark > 0 ? mark : pnl.marketPrice;
-  const equity      = pnl.balance + pnl.position * marketPrice;
-  const baseline    = pnl.startingEquity + pnl.totalRecharged;
-  return {
-    ...pnl,
-    marketPrice,
-    equity,
-    totalPnl: equity - baseline,
-  };
-}
-
-function applyUserFill(pnl: PnlState, trade: TradeEvent): PnlState {
-  let { balance, cashFlow, position } = pnl;
-  if (trade.user_buy) {
-    balance  -= trade.qty * trade.price;
-    cashFlow -= trade.qty * trade.price;
-    position += trade.qty;
-  }
-  if (trade.user_sell) {
-    balance  += trade.qty * trade.price;
-    cashFlow += trade.qty * trade.price;
-    position -= trade.qty;
-  }
-  return recomputeEquity({ ...pnl, balance, cashFlow, position }, trade.price);
-}
-
-function applyTrade(state: FeedState, trade: TradeEvent): FeedState {
-  const cutoff       = trade.ts - PRICE_BUFFER_MS;
-  const priceHistory = [...state.priceHistory.filter((p) => p.ts >= cutoff), {
-    ts: trade.ts, price: trade.price,
-  }];
-
-  let myOrders = state.myOrders;
-  let pnl      = state.pnl;
-
-  const buyIndex  = trade.user_buy  ? myOrders.findIndex((o) => o.orderId === trade.buy)  : -1;
-  const sellIndex = trade.user_sell ? myOrders.findIndex((o) => o.orderId === trade.sell) : -1;
-
-  if (buyIndex !== -1 || sellIndex !== -1) {
-    myOrders = myOrders.map((o, i) => {
-      if (i !== buyIndex && i !== sellIndex) return o;
-      const filledQty = o.filledQty + trade.qty;
-      return {
-        ...o,
-        filledQty,
-        status: filledQty >= o.qty ? 'filled' : o.status,
-      };
-    });
-    pnl = applyUserFill(pnl, trade);
-  }
-
-  return {
-    ...state,
-    trades: [trade, ...state.trades].slice(0, MAX_TRADES),
-    candles: appendCandle(state.candles, trade),
-    priceHistory, myOrders, pnl,
-  };
-}
-
-function applyBook(state: FeedState, book: BookEvent): FeedState {
-  const bestBid = book.bids[0]?.[0];
-  const bestAsk = book.asks[0]?.[0];
-  const mid     = bestBid !== undefined && bestAsk !== undefined
-    ? (bestBid + bestAsk) / 2
-    : state.pnl.marketPrice;
-  return { ...state, book, pnl: recomputeEquity(state.pnl, mid) };
-}
 
 export function useEngineFeed(url: string): FeedApi {
   const [state, setState] = useState<FeedState>(initialState);
@@ -177,15 +65,6 @@ export function useEngineFeed(url: string): FeedApi {
   }, []);
 
   const submit: FeedApi['submit'] = useCallback((params) => {
-    const reason = ((): string | null => {
-      // Buying needs cash. For market, estimate at the best ask; for limit at the limit price.
-      // (For an actual exchange you'd add a buffer for slippage.)
-      const liveBook = wsRef.current === null ? null : null; // placeholder; not used here
-      void liveBook;
-      return null;
-    })();
-    if (reason !== null) return { ok: false, reason };
-
     const clientId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
       ? crypto.randomUUID()
       : `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -193,22 +72,17 @@ export function useEngineFeed(url: string): FeedApi {
     let blocked: string | null = null;
     setState((s) => {
       if (params.side === 'buy') {
-        const estPrice = params.type === 'market'
-          ? (s.book?.asks[0]?.[0] ?? s.pnl.marketPrice)
-          : params.price;
-        const estCost = estPrice * params.qty;
-        if (!Number.isFinite(estCost) || estCost <= 0 || estCost > s.pnl.balance) {
-          blocked = estCost > s.pnl.balance
-            ? `Insufficient balance: need ${estCost.toFixed(2)}, have ${s.pnl.balance.toFixed(2)}`
-            : 'Cannot price this order';
+        const bestAsk = s.book?.asks[0]?.[0] ?? null;
+        const result  = evaluateBuy(params.type, params.price, params.qty, bestAsk, s.pnl, s.myOrders);
+        if (!result.affordable) {
+          blocked = result.estimatedCost <= 0 || !Number.isFinite(result.estimatedCost)
+            ? 'Cannot price this order'
+            : `Insufficient available cash: need $${result.estimatedCost.toFixed(2)}, available $${result.available.toFixed(2)}`;
           return s;
         }
-      } else if (params.side === 'sell') {
-        // Allow shorting (position can go negative); just block if no price info at all.
-        if (params.type !== 'limit' && s.pnl.marketPrice <= 0) {
-          blocked = 'Waiting for market price';
-          return s;
-        }
+      } else if (params.type !== 'limit' && s.pnl.marketPrice <= 0) {
+        blocked = 'Waiting for market price';
+        return s;
       }
 
       const draft: MyOrder = {
@@ -242,18 +116,14 @@ export function useEngineFeed(url: string): FeedApi {
   }, [send]);
 
   const recharge = useCallback(() => {
-    setState((s) => {
-      const pnl = recomputeEquity({
-        ...s.pnl,
-        balance:        s.pnl.balance + RECHARGE_AMOUNT,
-        totalRecharged: s.pnl.totalRecharged + RECHARGE_AMOUNT,
-      }, s.pnl.marketPrice);
-      return { ...s, pnl };
-    });
+    setState((s) => ({ ...s, pnl: applyRecharge(s.pnl) }));
   }, []);
 
   const reset = useCallback(() => {
-    setState((s) => ({ ...s, myOrders: [], pnl: initialPnl, candles: [], priceHistory: [], trades: [] }));
+    setState((s) => ({
+      ...s,
+      myOrders: [], pnl: initialPnl, candles: [], priceHistory: [], trades: [],
+    }));
   }, []);
 
   useEffect(() => {
@@ -327,12 +197,31 @@ export function useEngineFeed(url: string): FeedApi {
         try {
           const event = JSON.parse(msg.data) as EngineEvent;
           switch (event.type) {
-            case 'trade':
-              setState((s) => applyTrade(s, event));
+            case 'trade': {
+              const trade = event;
+              setState((s) => {
+                const cutoff       = trade.ts - PRICE_BUFFER_MS;
+                const priceHistory = [...s.priceHistory.filter((p) => p.ts >= cutoff), {
+                  ts: trade.ts, price: trade.price,
+                }];
+                const isUserFill = (trade.user_buy === true && s.myOrders.some((o) => o.orderId === trade.buy))
+                                || (trade.user_sell === true && s.myOrders.some((o) => o.orderId === trade.sell));
+                return {
+                  ...s,
+                  trades:   [trade, ...s.trades].slice(0, MAX_TRADES),
+                  candles:  appendCandle(s.candles, trade),
+                  priceHistory,
+                  myOrders: isUserFill ? applyTradeToOrders(s.myOrders, trade) : s.myOrders,
+                  pnl:      isUserFill ? applyUserFill(s.pnl, trade) : s.pnl,
+                };
+              });
               break;
-            case 'book':
-              setState((s) => applyBook(s, event));
+            }
+            case 'book': {
+              const book = event;
+              setState((s) => ({ ...s, book, pnl: applyBook(s.pnl, book) }));
               break;
+            }
             case 'stats':
               setState((s) => ({ ...s, stats: event }));
               break;
@@ -381,5 +270,13 @@ export function useEngineFeed(url: string): FeedApi {
     };
   }, [url]);
 
-  return { ...state, send, submit, cancel, togglePause, recharge, reset };
+  const reserved  = useMemo(() => reservedCash(state.myOrders), [state.myOrders]);
+  const available = state.pnl.balance - reserved;
+
+  return {
+    ...state,
+    reservedCash:  reserved,
+    availableCash: available,
+    send, submit, cancel, togglePause, recharge, reset,
+  };
 }
