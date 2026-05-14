@@ -1,5 +1,6 @@
 # Build artifacts
 build/
+build_*
 out/
 cmake-build-*/
 *.o
@@ -9,6 +10,14 @@ cmake-build-*/
 *.dylib
 *.dll
 *.exe
+
+# tsc incremental + accidental emit
+*.tsbuildinfo
+web/src/**/*.js
+web/src/**/*.js.map
+
+# Ad-hoc probes
+_e2e_probe.mjs
 
 # Node
 node_modules/
