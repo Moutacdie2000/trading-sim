@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeDepth } from '../DepthChart.js';
+import { computeDepth } from '../DepthChart';
 
 describe('computeDepth', () => {
   it('returns null when either side is empty', () => {

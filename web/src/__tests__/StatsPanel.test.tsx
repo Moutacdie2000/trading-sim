@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { ratesFrom } from '../StatsPanel.js';
-import type { StatsEvent } from '../types.js';
+import { ratesFrom } from '../StatsPanel';
+import type { StatsEvent } from '../types';
 
 function stats(ts: number, orders: number, trades: number): StatsEvent {
   return { type: 'stats', ts, orders, trades, books: 0 };

@@ -1,4 +1,4 @@
-import type { PnlState } from './useEngineFeed.js';
+import type { PnlState } from './useEngineFeed';
 
 interface Props {
   pnl:        PnlState;

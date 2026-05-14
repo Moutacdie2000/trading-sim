@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import type { PriceSample, StatsEvent } from './types.js';
+import type { PriceSample, StatsEvent } from './types';
 
 export interface StatsPanelProps {
   stats: StatsEvent | null;

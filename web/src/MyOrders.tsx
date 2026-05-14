@@ -1,4 +1,4 @@
-import type { MyOrder } from './types.js';
+import type { MyOrder } from './types';
 
 interface Props {
   orders:   MyOrder[];

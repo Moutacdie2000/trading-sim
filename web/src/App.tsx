@@ -1,11 +1,11 @@
-import { useEngineFeed } from './useEngineFeed.js';
-import { DepthChart }   from './DepthChart.js';
-import { Candlestick }  from './Candlestick.js';
-import { StatsPanel }   from './StatsPanel.js';
-import { OrderEntry }   from './OrderEntry.js';
-import { MyOrders }     from './MyOrders.js';
-import { Pnl }          from './Pnl.js';
-import { Help }         from './Help.js';
+import { useEngineFeed } from './useEngineFeed';
+import { DepthChart }   from './DepthChart';
+import { Candlestick }  from './Candlestick';
+import { StatsPanel }   from './StatsPanel';
+import { OrderEntry }   from './OrderEntry';
+import { MyOrders }     from './MyOrders';
+import { Pnl }          from './Pnl';
+import { Help }         from './Help';
 
 const FEED_URL = import.meta.env.VITE_FEED_URL ?? 'ws://localhost:8080/feed';
 

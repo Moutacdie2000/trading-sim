@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-import type { Candle } from './types.js';
+import type { Candle } from './types';
 
 interface Props {
   candles: Candle[];

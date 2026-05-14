@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { OrderSide, OrderType } from './types.js';
+import type { OrderSide, OrderType } from './types';
 
 interface Props {
   bestBid:  number | null;

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   BookEvent, Candle, EngineEvent, MyOrder, PriceSample,
   StatsEvent, TradeEvent, ClientCommand,
-} from './types.js';
+} from './types';
 
 const MAX_TRADES        = 50;
 const PRICE_BUFFER_MS   = 60_000;
