@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyBook, applyRecharge, applyTradeToOrders, applyUserFill,
+  appendTradeSample, bucketCandles,
   evaluateBuy, initialPnl, recomputeEquity, reservedCash,
-  INITIAL_BALANCE, RECHARGE_AMOUNT, MARKET_SLIPPAGE_BUFFER,
+  INITIAL_BALANCE, RECHARGE_AMOUNT, MARKET_SLIPPAGE_BUFFER, TRADE_SAMPLE_LIMIT,
   type PnlState,
 } from '../pnlReducer';
-import type { BookEvent, MyOrder, TradeEvent } from '../types';
+import type { BookEvent, MyOrder, TradeEvent, TradeSample } from '../types';
 
 function trade(over: Partial<TradeEvent> = {}): TradeEvent {
   return {
@@ -217,6 +218,56 @@ describe('applyTradeToOrders', () => {
     const b = order({ orderId: 2, side: 'sell' });
     const out = applyTradeToOrders([a, b], trade({ buy: 1, qty: 1, user_buy: true }));
     expect(out[1]).toBe(b);
+  });
+});
+
+describe('trade samples buffer', () => {
+  it('appends new samples up to the limit, then drops oldest', () => {
+    let s: TradeSample[] = [];
+    for (let i = 0; i < TRADE_SAMPLE_LIMIT + 5; i++) {
+      s = appendTradeSample(s, trade({ ts: i, price: i, qty: 1 }));
+    }
+    expect(s.length).toBe(TRADE_SAMPLE_LIMIT);
+    expect(s[0]!.ts).toBe(5);                                  // oldest dropped
+    expect(s[s.length - 1]!.ts).toBe(TRADE_SAMPLE_LIMIT + 4);   // newest kept
+  });
+});
+
+describe('bucketCandles (interval-driven aggregation)', () => {
+  const samples: TradeSample[] = [
+    { ts: 1_000, price: 100, qty: 1 },
+    { ts: 1_500, price: 102, qty: 2 },
+    { ts: 1_900, price:  99, qty: 1 },
+    { ts: 6_000, price: 105, qty: 3 },
+    { ts: 7_500, price: 104, qty: 1 },
+    { ts: 12_300, price: 110, qty: 2 },
+  ];
+
+  it('aggregates OHLCV correctly for each bucket', () => {
+    const candles = bucketCandles(samples, 5_000);
+    expect(candles).toHaveLength(3);
+    expect(candles[0]).toEqual({ startMs: 0,      open: 100, high: 102, low: 99,  close: 99,  volume: 4 });
+    expect(candles[1]).toEqual({ startMs: 5_000,  open: 105, high: 105, low: 104, close: 104, volume: 4 });
+    expect(candles[2]).toEqual({ startMs: 10_000, open: 110, high: 110, low: 110, close: 110, volume: 2 });
+  });
+
+  it('produces finer / coarser candles when the interval changes', () => {
+    // samples fall in seconds 1, 6, 7, 12 → four 1-second buckets.
+    expect(bucketCandles(samples,  1_000)).toHaveLength(4);
+    expect(bucketCandles(samples, 60_000)).toHaveLength(1);  // all in one bucket
+  });
+
+  it('caps the output at maxCandles, keeping the most recent', () => {
+    const longSeries: TradeSample[] = [];
+    for (let i = 0; i < 200; i++) longSeries.push({ ts: i * 1_000, price: i, qty: 1 });
+    const candles = bucketCandles(longSeries, 1_000, 10);
+    expect(candles).toHaveLength(10);
+    expect(candles[0]!.startMs).toBe(190_000);    // dropped 0..189
+  });
+
+  it('returns an empty array on empty input or non-positive interval', () => {
+    expect(bucketCandles([], 1_000)).toEqual([]);
+    expect(bucketCandles(samples, 0)).toEqual([]);
   });
 });
 

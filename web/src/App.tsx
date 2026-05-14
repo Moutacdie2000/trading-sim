@@ -1,22 +1,33 @@
-import { useEngineFeed } from './useEngineFeed';
-import { DepthChart }   from './DepthChart';
-import { Candlestick }  from './Candlestick';
-import { StatsPanel }   from './StatsPanel';
-import { OrderEntry }   from './OrderEntry';
-import { MyOrders }     from './MyOrders';
-import { Pnl }          from './Pnl';
-import { Help }         from './Help';
+import { useMemo, useState } from 'react';
+
+import { useEngineFeed }                  from './useEngineFeed';
+import { bucketCandles }                  from './pnlReducer';
+import { DepthChart }                     from './DepthChart';
+import { Candlestick }                    from './Candlestick';
+import { StatsPanel }                     from './StatsPanel';
+import { OrderEntry }                     from './OrderEntry';
+import { MyOrders }                       from './MyOrders';
+import { Pnl }                            from './Pnl';
+import { Help }                           from './Help';
+import { IntervalPicker, INTERVAL_OPTIONS } from './IntervalPicker';
 
 const FEED_URL = import.meta.env.VITE_FEED_URL ?? 'ws://localhost:8080/feed';
 
 export function App() {
   const feed = useEngineFeed(FEED_URL);
   const {
-    book, trades, candles, stats, priceHistory,
+    book, trades, tradeSamples, stats, priceHistory,
     connected, nextRetryInMs, paused,
     myOrders, pnl, reservedCash, availableCash,
     submit, cancel, togglePause, recharge, reset,
   } = feed;
+
+  const [intervalMs, setIntervalMs] = useState<number>(INTERVAL_OPTIONS[1]!.ms); // default 5s
+  const candles = useMemo(
+    () => bucketCandles(tradeSamples, intervalMs),
+    [tradeSamples, intervalMs],
+  );
+  const currentInterval = INTERVAL_OPTIONS.find((o) => o.ms === intervalMs)?.label ?? '';
 
   const bestBid = book?.bids[0]?.[0] ?? null;
   const bestAsk = book?.asks[0]?.[0] ?? null;
@@ -61,7 +72,10 @@ export function App() {
         </article>
 
         <article className="candles-panel">
-          <h2>Price (5s candles)</h2>
+          <div className="panel-head">
+            <h2>Price · {currentInterval} candles</h2>
+            <IntervalPicker value={intervalMs} onChange={setIntervalMs} />
+          </div>
           <Candlestick candles={candles} />
         </article>
 

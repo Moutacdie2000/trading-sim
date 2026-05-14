@@ -5,13 +5,17 @@
 // dedicated test surface.
 
 import type {
-  BookEvent, Candle, MyOrder, TradeEvent,
+  BookEvent, Candle, MyOrder, TradeEvent, TradeSample,
 } from './types';
 
 export const INITIAL_BALANCE   = 10_000;
 export const RECHARGE_AMOUNT   = 10_000;
-export const CANDLE_BUCKET_MS  = 5_000;
-export const CANDLES_KEPT      = 60;        // 5 minutes of 5s candles
+
+// Raw trade samples kept for re-bucketing into candles at any interval.
+// At ~30 trades/sec, 2000 samples ≈ 60 s of history — enough to show ~60
+// 1s candles or ~12 5s candles. Bumping it costs O(N) memory only.
+export const TRADE_SAMPLE_LIMIT = 2_000;
+export const CANDLES_KEPT       = 80;
 
 // Market orders aren't guaranteed to fill at the best ask — they walk the
 // book. We add this buffer when estimating cost so the user doesn't sneak
@@ -142,28 +146,47 @@ export function evaluateBuy(
 
 // ---- Candles -----------------------------------------------------------------
 
-export function appendCandle(prev: readonly Candle[], trade: TradeEvent): Candle[] {
-  const startMs = Math.floor(trade.ts / CANDLE_BUCKET_MS) * CANDLE_BUCKET_MS;
-  const last    = prev[prev.length - 1];
-  if (last !== undefined && last.startMs === startMs) {
-    const updated: Candle = {
-      ...last,
-      high:   Math.max(last.high, trade.price),
-      low:    Math.min(last.low,  trade.price),
-      close:  trade.price,
-      volume: last.volume + trade.qty,
-    };
-    return [...prev.slice(0, -1), updated];
+// Append a raw trade sample, dropping oldest if we exceed the cap.
+export function appendTradeSample(prev: readonly TradeSample[], trade: TradeEvent): TradeSample[] {
+  const next: TradeSample = { ts: trade.ts, price: trade.price, qty: trade.qty };
+  if (prev.length < TRADE_SAMPLE_LIMIT) return [...prev, next];
+  return [...prev.slice(prev.length - TRADE_SAMPLE_LIMIT + 1), next];
+}
+
+// Bucket the raw samples into candles of `intervalMs` width. Keeps at most
+// `maxCandles` (defaults to CANDLES_KEPT). Always returns a fresh array,
+// so passing it to a useMemo with [samples, intervalMs] as deps is correct.
+export function bucketCandles(
+  samples: readonly TradeSample[],
+  intervalMs: number,
+  maxCandles: number = CANDLES_KEPT,
+): Candle[] {
+  if (samples.length === 0 || intervalMs <= 0) return [];
+
+  const out: Candle[] = [];
+  let current: Candle | null = null;
+
+  for (const s of samples) {
+    const startMs = Math.floor(s.ts / intervalMs) * intervalMs;
+    if (current === null || current.startMs !== startMs) {
+      if (current !== null) out.push(current);
+      current = {
+        startMs,
+        open:   s.price,
+        high:   s.price,
+        low:    s.price,
+        close:  s.price,
+        volume: s.qty,
+      };
+    } else {
+      current.high   = Math.max(current.high, s.price);
+      current.low    = Math.min(current.low,  s.price);
+      current.close  = s.price;
+      current.volume = current.volume + s.qty;
+    }
   }
-  const fresh: Candle = {
-    startMs,
-    open:   trade.price,
-    high:   trade.price,
-    low:    trade.price,
-    close:  trade.price,
-    volume: trade.qty,
-  };
-  return [...prev, fresh].slice(-CANDLES_KEPT);
+  if (current !== null) out.push(current);
+  return out.slice(-maxCandles);
 }
 
 // ---- MyOrders status transitions --------------------------------------------

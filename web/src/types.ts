@@ -43,6 +43,8 @@ export type EngineEvent = TradeEvent | BookEvent | StatsEvent | AckEvent | State
 
 export interface PriceSample { ts: number; price: number; }
 
+export interface TradeSample { ts: number; price: number; qty: number; }
+
 export interface Candle {
   startMs: number;
   open:    number;

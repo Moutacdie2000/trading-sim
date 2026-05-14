@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
-  BookEvent, Candle, EngineEvent, MyOrder, PriceSample,
-  StatsEvent, TradeEvent, ClientCommand,
+  BookEvent, EngineEvent, MyOrder, PriceSample,
+  StatsEvent, TradeEvent, TradeSample, ClientCommand,
 } from './types';
 import {
-  applyBook, applyRecharge, applyTradeToOrders, applyUserFill, appendCandle,
+  applyBook, applyRecharge, applyTradeToOrders, applyUserFill, appendTradeSample,
   evaluateBuy, initialPnl, reservedCash,
   type PnlState,
 } from './pnlReducer';
@@ -20,7 +20,7 @@ export type { PnlState } from './pnlReducer';
 export interface FeedState {
   book:          BookEvent | null;
   trades:        TradeEvent[];
-  candles:       Candle[];
+  tradeSamples:  TradeSample[];
   stats:         StatsEvent | null;
   priceHistory:  PriceSample[];
   connected:     boolean;
@@ -43,7 +43,7 @@ export interface FeedApi extends FeedState {
 }
 
 const initialState: FeedState = {
-  book: null, trades: [], candles: [], stats: null, priceHistory: [],
+  book: null, trades: [], tradeSamples: [], stats: null, priceHistory: [],
   connected: false, nextRetryInMs: null, paused: false,
   myOrders: [], pnl: initialPnl,
 };
@@ -122,7 +122,7 @@ export function useEngineFeed(url: string): FeedApi {
   const reset = useCallback(() => {
     setState((s) => ({
       ...s,
-      myOrders: [], pnl: initialPnl, candles: [], priceHistory: [], trades: [],
+      myOrders: [], pnl: initialPnl, tradeSamples: [], priceHistory: [], trades: [],
     }));
   }, []);
 
@@ -208,11 +208,11 @@ export function useEngineFeed(url: string): FeedApi {
                                 || (trade.user_sell === true && s.myOrders.some((o) => o.orderId === trade.sell));
                 return {
                   ...s,
-                  trades:   [trade, ...s.trades].slice(0, MAX_TRADES),
-                  candles:  appendCandle(s.candles, trade),
+                  trades:       [trade, ...s.trades].slice(0, MAX_TRADES),
+                  tradeSamples: appendTradeSample(s.tradeSamples, trade),
                   priceHistory,
-                  myOrders: isUserFill ? applyTradeToOrders(s.myOrders, trade) : s.myOrders,
-                  pnl:      isUserFill ? applyUserFill(s.pnl, trade) : s.pnl,
+                  myOrders:     isUserFill ? applyTradeToOrders(s.myOrders, trade) : s.myOrders,
+                  pnl:          isUserFill ? applyUserFill(s.pnl, trade) : s.pnl,
                 };
               });
               break;
