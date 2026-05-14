@@ -18,8 +18,8 @@ export function App() {
   const {
     book, trades, tradeSamples, stats, priceHistory,
     connected, nextRetryInMs, paused,
-    myOrders, pnl, reservedCash, availableCash,
-    submit, cancel, togglePause, recharge, reset,
+    myOrders, pnl, reservedCash, availableCash, instrument,
+    submit, cancel, closePosition, togglePause, recharge, reset,
   } = feed;
 
   const [intervalMs, setIntervalMs] = useState<number>(INTERVAL_OPTIONS[1]!.ms); // default 5s
@@ -36,6 +36,10 @@ export function App() {
     <main>
       <header>
         <h1>trading-sim</h1>
+        <span className="symbol-chip" title={instrument.name}>
+          <strong>{instrument.symbol}</strong>
+          <em>{instrument.name}</em>
+        </span>
         <span className={connected ? 'pill ok' : 'pill ko'}>
           {connected ? 'live' : 'disconnected'}
         </span>
@@ -87,6 +91,7 @@ export function App() {
             availableCash={availableCash}
             onRecharge={recharge}
             onReset={reset}
+            onClosePosition={closePosition}
           />
         </article>
 

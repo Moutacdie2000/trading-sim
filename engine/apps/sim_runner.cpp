@@ -154,6 +154,17 @@ void emit_submit_ack(engine::OrderId id, std::string_view client_id) {
             .str());
 }
 
+void emit_reject_ack(engine::OrderId id, std::string_view client_id,
+                     std::string_view reason) {
+    emit(JsonLine("ack")
+            .field("ts",        now_ms())
+            .field("kind",      std::string_view{"reject"})
+            .field("order_id",  static_cast<std::uint64_t>(id))
+            .field("client_id", client_id)
+            .field("reason",    reason)
+            .str());
+}
+
 void emit_cancel_ack(engine::OrderId id, bool ok) {
     emit(JsonLine("ack")
             .field("ts",       now_ms())
@@ -213,7 +224,15 @@ void handle_command(const std::string& line, engine::OrderBook& book,
 
         emit_submit_ack(id, client_id);
 
-        for (const auto& t : book.add_order(o)) emit_trade(t);
+        const auto trades = book.add_order(o);
+        for (const auto& t : trades) emit_trade(t);
+
+        // FOK with zero fills means the engine bailed before mutating state —
+        // tell the dashboard explicitly so the order doesn't sit at "accepted"
+        // forever.
+        if (type == engine::OrderType::FOK && trades.empty()) {
+            emit_reject_ack(id, client_id, std::string_view{"insufficient depth"});
+        }
     }
 }
 

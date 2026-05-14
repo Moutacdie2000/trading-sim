@@ -11,6 +11,11 @@ const PORT                = Number(process.env.PORT ?? 8080);
 const STALE_FEED_MS       = 10_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 
+const SYMBOL              = process.env.SYMBOL          ?? 'SIMSTK';
+const INSTRUMENT_NAME     = process.env.INSTRUMENT_NAME ?? 'Acme Simulated Equity';
+const STARTING_PRICE      = Number(process.env.STARTING_PRICE   ?? 100);
+const STARTING_BALANCE    = Number(process.env.STARTING_BALANCE ?? 10_000);
+
 async function main(): Promise<void> {
   const app = Fastify({ logger: true });
 
@@ -48,6 +53,19 @@ async function main(): Promise<void> {
     hub.addClient(ws);
     metrics.setClients(hub.count());
     app.log.info({ clients: hub.count() }, 'client connected');
+
+    // Send the config event first so the dashboard can label the instrument
+    // and frame everything else (starting balance, etc.) before any trades.
+    try {
+      ws.send(JSON.stringify({
+        type:             'config',
+        ts:               Date.now(),
+        symbol:           SYMBOL,
+        instrument_name:  INSTRUMENT_NAME,
+        starting_price:   STARTING_PRICE,
+        starting_balance: STARTING_BALANCE,
+      }));
+    } catch { /* socket already closed */ }
 
     ws.on('message', (raw) => {
       let parsed: unknown;

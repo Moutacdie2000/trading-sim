@@ -27,6 +27,9 @@ export interface PnlState {
   startingEquity: number;
   cashFlow:       number;
   position:       number;
+  avgCost:        number;   // weighted-average entry price; 0 when flat
+  realizedPnl:    number;
+  unrealizedPnl:  number;
   marketPrice:    number;
   equity:         number;
   totalPnl:       number;
@@ -38,6 +41,9 @@ export const initialPnl: PnlState = {
   startingEquity: INITIAL_BALANCE,
   cashFlow:       0,
   position:       0,
+  avgCost:        0,
+  realizedPnl:    0,
+  unrealizedPnl:  0,
   marketPrice:    0,
   equity:         INITIAL_BALANCE,
   totalPnl:       0,
@@ -45,40 +51,82 @@ export const initialPnl: PnlState = {
 };
 
 // equity = cash + position × mark.
-// totalPnl = equity − (initial deposit + cumulative recharges).
+// unrealizedPnl = position × (mark − avgCost) — signed, so it's correct for
+// both long and short positions.
+// totalPnl = realized + unrealized = equity − (initial deposit + cumulative
+// recharges). The latter form is the invariant; the former is the trader-
+// facing decomposition.
 // Mark is only updated on book events (mid of bid/ask). Trades do NOT
 // overwrite it: the mid is "fairer" than the most recent print, and using
 // the trade price for the mark would erase any immediate alpha from
 // crossing inside the spread.
 export function recomputeEquity(pnl: PnlState, mark: number): PnlState {
-  const marketPrice = mark > 0 ? mark : pnl.marketPrice;
-  const equity      = pnl.balance + pnl.position * marketPrice;
-  const baseline    = pnl.startingEquity + pnl.totalRecharged;
+  const marketPrice  = mark > 0 ? mark : pnl.marketPrice;
+  const equity       = pnl.balance + pnl.position * marketPrice;
+  const baseline     = pnl.startingEquity + pnl.totalRecharged;
+  const unrealized   = pnl.position === 0 ? 0 : pnl.position * (marketPrice - pnl.avgCost);
   return {
     ...pnl,
     marketPrice,
     equity,
-    totalPnl: equity - baseline,
+    unrealizedPnl: unrealized,
+    totalPnl:      equity - baseline,
   };
 }
 
-// Apply a single user fill to balance / cashFlow / position.
-// Mark is NOT touched here — see recomputeEquity above.
+// Pure update for one leg of a fill (buy OR sell). Handles all four cases:
+// open, extend, reduce, flip. Realized P&L gets booked on the closed portion;
+// avgCost gets weighted-averaged on the extending portion and reset on flip.
+function applySide(pnl: PnlState, side: 'buy' | 'sell', qty: number, price: number): PnlState {
+  if (qty <= 0) return pnl;
+
+  let { balance, cashFlow, position, avgCost, realizedPnl } = pnl;
+  const signedQty = side === 'buy' ? qty : -qty;
+  const cashDelta = side === 'buy' ? -qty * price : qty * price;
+  balance  += cashDelta;
+  cashFlow += cashDelta;
+
+  if (position === 0) {
+    // Opening from flat
+    position = signedQty;
+    avgCost  = price;
+  } else if (Math.sign(position) === Math.sign(signedQty)) {
+    // Extending same direction → weighted-average the cost basis
+    const absOld = Math.abs(position);
+    avgCost  = (avgCost * absOld + price * qty) / (absOld + qty);
+    position += signedQty;
+  } else {
+    // Opposite sign: reducing or flipping
+    const absPos   = Math.abs(position);
+    const closeQty = Math.min(qty, absPos);
+    // Long → sell: gain = (sell − cost) × qty
+    // Short → buy: gain = (cost − buy) × qty
+    realizedPnl += (position > 0 ? (price - avgCost) : (avgCost - price)) * closeQty;
+
+    if (qty <= absPos) {
+      // Partial or full close, no flip
+      position += signedQty;
+      if (position === 0) avgCost = 0;
+    } else {
+      // Flip: close existing then open in the new direction
+      const flipQty = qty - absPos;
+      position = side === 'buy' ? flipQty : -flipQty;
+      avgCost  = price;
+    }
+  }
+
+  return { ...pnl, balance, cashFlow, position, avgCost, realizedPnl };
+}
+
+// Apply a trade event to the P&L state. A "self-cross" (a user buy matched
+// by another user sell — possible if you hit your own resting limit) cancels
+// out cash- and position-wise, so we treat it as a no-op.
 export function applyUserFill(pnl: PnlState, trade: TradeEvent): PnlState {
-  let { balance, cashFlow, position } = pnl;
-  if (trade.user_buy) {
-    const cost = trade.qty * trade.price;
-    balance  -= cost;
-    cashFlow -= cost;
-    position += trade.qty;
-  }
-  if (trade.user_sell) {
-    const proceeds = trade.qty * trade.price;
-    balance  += proceeds;
-    cashFlow += proceeds;
-    position -= trade.qty;
-  }
-  return recomputeEquity({ ...pnl, balance, cashFlow, position }, pnl.marketPrice);
+  if (trade.user_buy && trade.user_sell) return pnl;
+  let next = pnl;
+  if (trade.user_buy)  next = applySide(next, 'buy',  trade.qty, trade.price);
+  if (trade.user_sell) next = applySide(next, 'sell', trade.qty, trade.price);
+  return recomputeEquity(next, pnl.marketPrice);
 }
 
 export function applyBook(pnl: PnlState, book: BookEvent): PnlState {

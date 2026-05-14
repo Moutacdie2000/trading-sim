@@ -29,10 +29,20 @@ export interface StatsEvent {
 export interface AckEvent {
   type: 'ack';
   ts: number;
-  kind: 'submit' | 'cancel';
+  kind: 'submit' | 'cancel' | 'reject';
   order_id: number;
   client_id?: string;
   ok?: boolean;
+  reason?: string;
+}
+
+export interface ConfigEvent {
+  type: 'config';
+  ts: number;
+  symbol: string;
+  instrument_name: string;
+  starting_price: number;
+  starting_balance: number;
 }
 
 export interface StateEvent {
@@ -41,7 +51,7 @@ export interface StateEvent {
   paused: boolean;
 }
 
-export type EngineEvent = TradeEvent | BookEvent | StatsEvent | AckEvent | StateEvent;
+export type EngineEvent = TradeEvent | BookEvent | StatsEvent | AckEvent | StateEvent | ConfigEvent;
 
 export type EngineEventType = EngineEvent['type'];
 
@@ -49,7 +59,7 @@ export function isEngineEvent(value: unknown): value is EngineEvent {
   if (typeof value !== 'object' || value === null) return false;
   const type = (value as { type?: unknown }).type;
   return type === 'trade' || type === 'book'  || type === 'stats'
-      || type === 'ack'   || type === 'state';
+      || type === 'ack'   || type === 'state' || type === 'config';
 }
 
 // ---- Inbound client commands (WebSocket → gateway → engine stdin) ------------

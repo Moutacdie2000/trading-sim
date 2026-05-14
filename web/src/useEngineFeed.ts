@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
-  BookEvent, EngineEvent, MyOrder, PriceSample,
+  BookEvent, ConfigEvent, EngineEvent, MyOrder, OrderSide, PriceSample,
   StatsEvent, TradeEvent, TradeSample, ClientCommand,
 } from './types';
 import {
@@ -17,6 +17,20 @@ const STABLE_OPEN_MS    = 10_000;
 
 export type { PnlState } from './pnlReducer';
 
+export interface InstrumentInfo {
+  symbol:          string;
+  name:            string;
+  startingPrice:   number;
+  startingBalance: number;
+}
+
+const DEFAULT_INSTRUMENT: InstrumentInfo = {
+  symbol:          'SIMSTK',
+  name:            'Simulated Instrument',
+  startingPrice:   100,
+  startingBalance: 10_000,
+};
+
 export interface FeedState {
   book:          BookEvent | null;
   trades:        TradeEvent[];
@@ -28,6 +42,7 @@ export interface FeedState {
   paused:        boolean;
   myOrders:      MyOrder[];
   pnl:           PnlState;
+  instrument:    InstrumentInfo;
 }
 
 export interface FeedApi extends FeedState {
@@ -37,6 +52,7 @@ export interface FeedApi extends FeedState {
   submit:         (params: Omit<Extract<ClientCommand, { cmd: 'submit' }>, 'cmd' | 'client_id'>) =>
                     { ok: true; clientId: string } | { ok: false; reason: string };
   cancel:         (orderId: number) => void;
+  closePosition:  () => void;
   togglePause:    () => void;
   recharge:       () => void;
   reset:          () => void;
@@ -46,7 +62,13 @@ const initialState: FeedState = {
   book: null, trades: [], tradeSamples: [], stats: null, priceHistory: [],
   connected: false, nextRetryInMs: null, paused: false,
   myOrders: [], pnl: initialPnl,
+  instrument: DEFAULT_INSTRUMENT,
 };
+
+function genClientId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export function useEngineFeed(url: string): FeedApi {
   const [state, setState] = useState<FeedState>(initialState);
@@ -65,11 +87,9 @@ export function useEngineFeed(url: string): FeedApi {
   }, []);
 
   const submit: FeedApi['submit'] = useCallback((params) => {
-    const clientId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-      ? crypto.randomUUID()
-      : `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
+    const clientId = genClientId();
     let blocked: string | null = null;
+
     setState((s) => {
       if (params.side === 'buy') {
         const bestAsk = s.book?.asks[0]?.[0] ?? null;
@@ -108,6 +128,22 @@ export function useEngineFeed(url: string): FeedApi {
     send({ cmd: 'cancel', id: orderId });
   }, [send]);
 
+  const closePosition = useCallback(() => {
+    setState((s) => {
+      if (s.pnl.position === 0) return s;
+      const qty  = Math.abs(s.pnl.position);
+      const side: OrderSide = s.pnl.position > 0 ? 'sell' : 'buy';
+      const clientId = genClientId();
+      send({ cmd: 'submit', side, type: 'market', price: 0, qty, client_id: clientId });
+      const draft: MyOrder = {
+        clientId, orderId: null, side, type: 'market',
+        price: 0, qty, filledQty: 0,
+        status: 'pending', submittedAt: Date.now(),
+      };
+      return { ...s, myOrders: [draft, ...s.myOrders].slice(0, 20) };
+    });
+  }, [send]);
+
   const togglePause = useCallback(() => {
     setState((s) => {
       send({ cmd: s.paused ? 'resume' : 'pause' });
@@ -120,11 +156,21 @@ export function useEngineFeed(url: string): FeedApi {
   }, []);
 
   const reset = useCallback(() => {
-    setState((s) => ({
-      ...s,
-      myOrders: [], pnl: initialPnl, tradeSamples: [], priceHistory: [], trades: [],
-    }));
-  }, []);
+    setState((s) => {
+      // Cancel actually-resting limit orders so they don't keep filling
+      // against the engine after we've zeroed the local view.
+      for (const o of s.myOrders) {
+        if (o.type === 'limit' && o.status === 'accepted' && o.orderId !== null) {
+          send({ cmd: 'cancel', id: o.orderId });
+        }
+      }
+      return {
+        ...s,
+        myOrders: [], pnl: initialPnl,
+        tradeSamples: [], priceHistory: [], trades: [],
+      };
+    });
+  }, [send]);
 
   useEffect(() => {
     closedRef.current = false;
@@ -197,6 +243,19 @@ export function useEngineFeed(url: string): FeedApi {
         try {
           const event = JSON.parse(msg.data) as EngineEvent;
           switch (event.type) {
+            case 'config': {
+              const cfg: ConfigEvent = event;
+              setState((s) => ({
+                ...s,
+                instrument: {
+                  symbol:          cfg.symbol,
+                  name:            cfg.instrument_name,
+                  startingPrice:   cfg.starting_price,
+                  startingBalance: cfg.starting_balance,
+                },
+              }));
+              break;
+            }
             case 'trade': {
               const trade = event;
               setState((s) => {
@@ -239,6 +298,15 @@ export function useEngineFeed(url: string): FeedApi {
                       ? { ...o, orderId, status: 'accepted' }
                       : o),
                 }));
+              } else if (event.kind === 'reject') {
+                const orderId = event.order_id;
+                setState((s) => ({
+                  ...s,
+                  myOrders: s.myOrders.map((o) =>
+                    o.orderId === orderId
+                      ? { ...o, status: 'rejected' }
+                      : o),
+                }));
               } else if (event.kind === 'cancel') {
                 const orderId = event.order_id;
                 const ok      = event.ok ?? false;
@@ -277,6 +345,6 @@ export function useEngineFeed(url: string): FeedApi {
     ...state,
     reservedCash:  reserved,
     availableCash: available,
-    send, submit, cancel, togglePause, recharge, reset,
+    send, submit, cancel, closePosition, togglePause, recharge, reset,
   };
 }

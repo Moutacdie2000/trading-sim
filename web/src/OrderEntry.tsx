@@ -110,6 +110,30 @@ export function OrderEntry({ bestBid, bestAsk, availableCash, disabled, onSubmit
           disabled={!needsPrice}
           onChange={(e) => setPrice(e.target.value)}
         />
+        {needsPrice && (
+          <div className="quick-fill">
+            <button
+              type="button"
+              disabled={bestBid === null}
+              onClick={() => bestBid !== null && setPrice(bestBid.toFixed(2))}
+              title="Use the best bid as the price"
+            >bid {bestBid?.toFixed(2) ?? '—'}</button>
+            <button
+              type="button"
+              disabled={bestBid === null || bestAsk === null}
+              onClick={() => {
+                if (bestBid !== null && bestAsk !== null) setPrice(((bestBid + bestAsk) / 2).toFixed(2));
+              }}
+              title="Use the mid price"
+            >mid</button>
+            <button
+              type="button"
+              disabled={bestAsk === null}
+              onClick={() => bestAsk !== null && setPrice(bestAsk.toFixed(2))}
+              title="Use the best ask as the price"
+            >ask {bestAsk?.toFixed(2) ?? '—'}</button>
+          </div>
+        )}
       </label>
 
       <label className="field">

@@ -98,6 +98,32 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
+.symbol-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #1f2531;
+  border: 1px solid #2a3142;
+}
+.symbol-chip strong { font-size: 13px; letter-spacing: 0.04em; color: var(--fg); }
+.symbol-chip em     { font-style: normal; font-size: 11px; color: var(--muted); }
+
+.close-pos-btn {
+  flex: 1;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ask);
+  background: rgba(248, 113, 113, 0.10);
+  color: var(--ask);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.close-pos-btn:hover:not(:disabled) { background: rgba(248, 113, 113, 0.20); }
+.close-pos-btn:disabled { opacity: 0.35; cursor: not-allowed; border-color: #2a3142; color: var(--muted); background: #1f2531; }
+
 .order-entry { display: flex; flex-direction: column; gap: 10px; }
 .order-entry .row { display: flex; gap: 8px; }
 
@@ -147,6 +173,25 @@ h2 {
 @keyframes flash-err { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 
 .hint { font-size: 11px; color: var(--muted); }
+
+.quick-fill {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.quick-fill button {
+  flex: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid #2a3142;
+  background: #1f2531;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.quick-fill button:hover:not(:disabled) { color: var(--fg); border-color: #3a4258; }
+.quick-fill button:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .cost-line {
   font-size: 11px;

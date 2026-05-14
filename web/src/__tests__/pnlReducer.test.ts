@@ -221,6 +221,83 @@ describe('applyTradeToOrders', () => {
   });
 });
 
+describe('avg cost & realized vs unrealized P&L', () => {
+  it('opens a long: avg cost = fill price, no realized P&L yet', () => {
+    const pnl = applyUserFill(initialPnl, trade({ price: 100, qty: 5, user_buy: true }));
+    expect(pnl.position).toBe(5);
+    expect(pnl.avgCost).toBe(100);
+    expect(pnl.realizedPnl).toBe(0);
+  });
+
+  it('extending a long weighted-averages the cost basis', () => {
+    let pnl = applyUserFill(initialPnl, trade({ price: 100, qty: 5, user_buy: true }));
+    pnl = applyUserFill(pnl, trade({ price: 110, qty: 5, user_buy: true }));
+    expect(pnl.position).toBe(10);
+    expect(pnl.avgCost).toBe(105);                       // (100×5 + 110×5)/10
+    expect(pnl.realizedPnl).toBe(0);
+  });
+
+  it('partial close books realized P&L; avg cost stays put', () => {
+    let pnl = applyUserFill(initialPnl, trade({ price: 100, qty: 10, user_buy: true }));
+    pnl = applyUserFill(pnl, trade({ price: 105, qty: 4, user_sell: true }));
+    expect(pnl.position).toBe(6);
+    expect(pnl.avgCost).toBe(100);                       // unchanged on close
+    expect(pnl.realizedPnl).toBe(20);                    // (105−100) × 4
+  });
+
+  it('full close zeros the position and resets avg cost', () => {
+    let pnl = applyUserFill(initialPnl, trade({ price: 100, qty: 5, user_buy: true }));
+    pnl = applyBook(pnl, book(98, 100));                  // mark = 99
+    pnl = applyUserFill(pnl, trade({ price: 102, qty: 5, user_sell: true }));
+    expect(pnl.position).toBe(0);
+    expect(pnl.avgCost).toBe(0);
+    expect(pnl.realizedPnl).toBe(10);                    // (102−100) × 5
+    expect(pnl.unrealizedPnl).toBe(0);
+  });
+
+  it('flip from long to short closes the long and opens the short at trade price', () => {
+    let pnl = applyUserFill(initialPnl, trade({ price: 100, qty: 5, user_buy: true }));
+    // Sell 8 → close 5 (book realized) then open short of 3 at fill price.
+    pnl = applyUserFill(pnl, trade({ price: 105, qty: 8, user_sell: true }));
+    expect(pnl.position).toBe(-3);
+    expect(pnl.avgCost).toBe(105);                       // new short opened here
+    expect(pnl.realizedPnl).toBe(25);                    // (105−100) × 5
+  });
+
+  it('short P&L: gain when buying back below avg short price', () => {
+    let pnl = applyBook(initialPnl, book(99, 101));
+    pnl = applyUserFill(pnl, trade({ price: 100, qty: 5, user_sell: true }));
+    expect(pnl.position).toBe(-5);
+    expect(pnl.avgCost).toBe(100);
+    pnl = applyUserFill(pnl, trade({ price: 95, qty: 5, user_buy: true }));
+    expect(pnl.position).toBe(0);
+    expect(pnl.realizedPnl).toBe(25);                    // (100−95) × 5
+  });
+
+  it('unrealizedPnl = position × (mark − avgCost), positive or negative', () => {
+    let pnl = applyUserFill(initialPnl, trade({ price: 100, qty: 5, user_buy: true }));
+    pnl = applyBook(pnl, book(101, 103));                // mark 102
+    expect(pnl.unrealizedPnl).toBe(10);
+    pnl = applyBook(pnl, book(98, 100));                 // mark 99
+    expect(pnl.unrealizedPnl).toBe(-5);
+  });
+
+  it('invariant: equity − baseline === realized + unrealized', () => {
+    let pnl = applyUserFill(initialPnl, trade({ price: 100, qty: 10, user_buy: true }));
+    pnl = applyUserFill(pnl, trade({ price: 110, qty: 4, user_sell: true }));
+    pnl = applyBook(pnl, book(112, 114));                // mark 113
+    const baseline = pnl.startingEquity + pnl.totalRecharged;
+    expect(pnl.totalPnl).toBeCloseTo(pnl.equity - baseline);
+    expect(pnl.realizedPnl + pnl.unrealizedPnl).toBeCloseTo(pnl.totalPnl);
+  });
+
+  it('self-cross trade (both user_buy and user_sell) is a no-op', () => {
+    const before = applyUserFill(initialPnl, trade({ price: 100, qty: 5, user_buy: true }));
+    const after  = applyUserFill(before, trade({ price: 100, qty: 1, user_buy: true, user_sell: true }));
+    expect(after).toEqual(before);
+  });
+});
+
 describe('trade samples buffer', () => {
   it('appends new samples up to the limit, then drops oldest', () => {
     let s: TradeSample[] = [];
