@@ -3,6 +3,19 @@
 A real-time limit-order-book simulator. End-to-end demonstration of modern C++,
 TypeScript/Node.js, React, Qt 6 and CI/CD — built as a single coherent system.
 
+## Screenshots
+
+The web dashboard, top of the screen — submit panel, candlestick chart with
+the interval picker (1s / 5s / 15s / 1m / 5m), live P&L with cash balance,
+position, avg cost, realized vs unrealized:
+
+![Dashboard overview](docs/media/dashboard-overview.png)
+
+Below the fold — recent trades tape, order book table, throughput stats, and
+the user's own orders with their live status:
+
+![Trades, book and my orders](docs/media/dashboard-orders-tape.png)
+
 ## Architecture
 
 ```
