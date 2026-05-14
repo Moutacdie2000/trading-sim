@@ -3,7 +3,7 @@
 A real-time limit-order-book simulator. End-to-end demonstration of modern C++,
 TypeScript/Node.js, React, Qt 6 and CI/CD — built as a single coherent system.
 
-## Screenshots
+## Screenshots & demo
 
 The web dashboard, top of the screen — submit panel, candlestick chart with
 the interval picker (1s / 5s / 15s / 1m / 5m), live P&L with cash balance,
@@ -15,6 +15,16 @@ Below the fold — recent trades tape, order book table, throughput stats, and
 the user's own orders with their live status:
 
 ![Trades, book and my orders](docs/media/dashboard-orders-tape.png)
+
+### Live demo
+
+Short screen recording of the dashboard in action — submitting orders, watching
+fills, P&L updating, candles bucketing in real time.
+
+<video src="https://github.com/Moutacdie2000/trading-sim/raw/main/docs/media/dashboard-demo.mov" controls width="800"></video>
+
+> If your browser doesn't render the inline player, download the demo
+> directly: [`docs/media/dashboard-demo.mov`](docs/media/dashboard-demo.mov).
 
 ## Architecture
 
